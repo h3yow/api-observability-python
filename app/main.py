@@ -52,6 +52,20 @@ def _error_payload(category: ErrorCategory, message: str, request_id: str | None
     }
 
 
+def _error_response(
+    category: ErrorCategory, message: str, request_id: str | None, status_code: int
+) -> JSONResponse:
+    response = JSONResponse(
+        status_code=status_code,
+        content=_error_payload(category, message, request_id),
+    )
+    if request_id:
+        # 未预期异常由最外层 ServerErrorMiddleware 生成响应，不经过业务中间件，
+        # 因此必须在处理器内回写响应头，保证错误响应也能用标识关联。
+        response.headers[REQUEST_ID_HEADER] = request_id
+    return response
+
+
 def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title="api-observability-python")
@@ -91,13 +105,14 @@ def create_app() -> FastAPI:
         logger.log(
             level,
             "request failed",
-            extra={"category": exc.category.value, "detail": exc.detail},
+            extra={
+                "request_id": request_id,
+                "category": exc.category.value,
+                "detail": exc.detail,
+            },
             exc_info=exc if exc.category is not ErrorCategory.VALIDATION else None,
         )
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=_error_payload(exc.category, exc.public_message, request_id),
-        )
+        return _error_response(exc.category, exc.public_message, request_id, exc.status_code)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
@@ -106,13 +121,14 @@ def create_app() -> FastAPI:
         request_id = getattr(request.state, "request_id", None)
         logger.warning(
             "request validation failed",
-            extra={"category": ErrorCategory.VALIDATION.value, "errors": exc.errors()},
+            extra={
+                "request_id": request_id,
+                "category": ErrorCategory.VALIDATION.value,
+                "errors": exc.errors(),
+            },
         )
-        return JSONResponse(
-            status_code=422,
-            content=_error_payload(
-                ErrorCategory.VALIDATION, "request validation failed", request_id
-            ),
+        return _error_response(
+            ErrorCategory.VALIDATION, "request validation failed", request_id, 422
         )
 
     @app.exception_handler(Exception)
@@ -120,15 +136,13 @@ def create_app() -> FastAPI:
         request_id = getattr(request.state, "request_id", None)
         logger.error(
             "unexpected error",
-            extra={"category": ErrorCategory.UNEXPECTED.value},
+            extra={
+                "request_id": request_id,
+                "category": ErrorCategory.UNEXPECTED.value,
+            },
             exc_info=exc,
         )
-        return JSONResponse(
-            status_code=500,
-            content=_error_payload(
-                ErrorCategory.UNEXPECTED, "internal error", request_id
-            ),
-        )
+        return _error_response(ErrorCategory.UNEXPECTED, "internal error", request_id, 500)
 
     app.include_router(router)
 

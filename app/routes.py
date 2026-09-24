@@ -16,6 +16,7 @@ from app.errors import DependencyUnavailableError, ValidationFailedError
 from app.health import health_state
 from app.logging_config import get_logger
 from app.metrics import registry
+from app.request_id import get_request_id
 
 router = APIRouter()
 logger = get_logger()
@@ -31,6 +32,12 @@ def demo_ok(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, A
     # 业务字段经脱敏后进入结构化日志。
     logger.info("demo ok", extra={"payload": payload})
     return {"received_keys": sorted(payload.keys())}
+
+
+@router.get("/demo/context")
+def demo_context() -> dict[str, str | None]:
+    # 直接回读 ContextVar，用于验证并发下标识不串扰。
+    return {"context_request_id": get_request_id()}
 
 
 @router.get("/demo/validation")
