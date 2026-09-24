@@ -26,9 +26,9 @@ def test_valid_request_id_is_reused(client: TestClient) -> None:
     assert r.headers["x-request-id"] == "order-2026.09_25"
 
 
-@pytest.mark.parametrize("bad", ["has space", "café-01", "x" * 65, ""])
+@pytest.mark.parametrize("bad", ["has space", "id\ttab", "x" * 65, ""])
 def test_invalid_request_id_is_replaced(client: TestClient, bad: str) -> None:
-    print(f"输入: X-Request-ID={bad!r}（非法：含空格/非ASCII/超长/空）")
+    print(f"输入: X-Request-ID={bad!r}（非法：含空格/控制字符/超长/空）")
     r = client.get("/echo", headers={"X-Request-ID": bad})
     rid = r.json()["request_id"]
     print(f"判定依据: 非法标识不得沿用，应生成 32 位十六进制 UUID, 实际={rid}")
