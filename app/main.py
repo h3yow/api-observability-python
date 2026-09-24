@@ -67,8 +67,12 @@ def create_app() -> FastAPI:
         return {"Hello": "World"}
 
     @app.get("/echo")
-    def echo() -> dict[str, str | None]:
-        # 用于验证标识透传与上下文隔离
+    async def echo(delay: float = 0) -> dict[str, str | None]:
+        # 用于验证标识透传与上下文隔离；delay 可制造并发交错
+        if delay > 0:
+            import asyncio
+
+            await asyncio.sleep(delay)
         return {"request_id": get_request_id(), "caller_id": get_caller_id()}
 
     @app.get("/boom/{kind}")
