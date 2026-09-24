@@ -19,4 +19,14 @@ def liveness() -> dict[str, str]:
 
 def readiness() -> tuple[int, dict[str, object]]:
     """就绪：所有依赖检查通过才就绪；返回 (http_status, body)。"""
-    raise NotImplementedError
+    results: dict[str, str] = {}
+    ready = True
+    for name, check in _readiness_checks.items():
+        try:
+            check()
+            results[name] = "ok"
+        except Exception as exc:  # 依赖异常只影响该检查项，不拖垮整个探针
+            results[name] = f"unavailable: {type(exc).__name__}"
+            ready = False
+    status = 200 if ready else 503
+    return status, {"status": "ready" if ready else "not_ready", "checks": results}
