@@ -1,6 +1,7 @@
 """ASGI 中间件：request_id 生成与透传、上下文隔离、指标记录。"""
 from __future__ import annotations
 
+import json
 import re
 import time
 from uuid import uuid4
@@ -8,7 +9,10 @@ from uuid import uuid4
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.observability.context import caller_id_var, request_id_var
+from app.observability.logging import get_logger
 from app.observability.metrics import registry
+
+logger = get_logger("app.observability")
 
 REQUEST_ID_HEADER = "x-request-id"
 CALLER_ID_HEADER = "x-caller-id"
@@ -65,6 +69,35 @@ class ObservabilityMiddleware:
 
         try:
             await self.app(scope, receive, send_with_request_id)
+        except Exception as exc:
+            # 未预期异常：在上下文仍存活时记录日志，再返回不含内部细节的 500
+            status_code = 500
+            logger.error(
+                "unexpected error",
+                extra={"fields": {"category": "unexpected"}},
+                exc_info=exc,
+            )
+            body = json.dumps(
+                {
+                    "error": {
+                        "category": "unexpected",
+                        "message": "internal error",
+                        "request_id": request_id,
+                    }
+                }
+            ).encode()
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 500,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        (REQUEST_ID_HEADER.encode(), request_id.encode()),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
         finally:
             latency_ms = (time.perf_counter() - start) * 1000.0
             registry.record(caller_id, latency_ms, is_error=status_code >= 400)
