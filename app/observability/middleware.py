@@ -10,13 +10,21 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.observability.context import caller_id_var, request_id_var
 from app.observability.logging import get_logger
-from app.observability.metrics import registry
+from app.observability.metrics import (
+    CATEGORY_DEPENDENCY,
+    CATEGORY_UNEXPECTED,
+    CATEGORY_VALIDATION,
+    registry,
+)
 
 logger = get_logger("app.observability")
 
 REQUEST_ID_HEADER = "x-request-id"
 CALLER_ID_HEADER = "x-caller-id"
 UNKNOWN_CALLER = "unknown"
+
+# 异常处理器把已判定的错误类别写入 scope（同一 scope 引用贯穿整条 ASGI 链）
+SCOPE_ERROR_CATEGORY = "obs_error_category"
 
 # 合法标识：1-64 位的字母数字、横线、下划线、点
 _VALID_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -25,6 +33,17 @@ _VALID_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 def is_valid_request_id(value: str | None) -> bool:
     """判断调用方提供的标识是否合法可沿用。"""
     return bool(value) and bool(_VALID_ID.match(value))
+
+
+def category_for_status(status_code: int) -> str | None:
+    """无显式类别时按状态码兜底归类，保证每个错误都能落入三类之一。"""
+    if status_code < 400:
+        return None
+    if status_code == 503:
+        return CATEGORY_DEPENDENCY
+    if status_code >= 500:
+        return CATEGORY_UNEXPECTED
+    return CATEGORY_VALIDATION  # 其余 4xx 视为客户端/校验类问题
 
 
 class ObservabilityMiddleware:
@@ -72,6 +91,7 @@ class ObservabilityMiddleware:
         except Exception as exc:
             # 未预期异常：在上下文仍存活时记录日志，再返回不含内部细节的 500
             status_code = 500
+            scope[SCOPE_ERROR_CATEGORY] = CATEGORY_UNEXPECTED
             logger.error(
                 "unexpected error",
                 extra={"fields": {"category": "unexpected"}},
@@ -100,6 +120,12 @@ class ObservabilityMiddleware:
             await send({"type": "http.response.body", "body": body})
         finally:
             latency_ms = (time.perf_counter() - start) * 1000.0
-            registry.record(caller_id, latency_ms, is_error=status_code >= 400)
+            category = scope.get(SCOPE_ERROR_CATEGORY) or category_for_status(status_code)
+            registry.record(
+                caller_id,
+                latency_ms,
+                is_error=status_code >= 400,
+                category=category,
+            )
             request_id_var.reset(rid_token)
             caller_id_var.reset(cid_token)

@@ -16,7 +16,7 @@ from app.observability.errors import (
 )
 from app.observability.logging import get_logger
 from app.observability.metrics import registry
-from app.observability.middleware import ObservabilityMiddleware
+from app.observability.middleware import SCOPE_ERROR_CATEGORY, ObservabilityMiddleware
 
 logger = get_logger("app")
 
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
+        request.scope[SCOPE_ERROR_CATEGORY] = exc.category.value
         logger.warning(
             "request failed: %s",
             exc.public_message,
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     async def handle_validation_error(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        request.scope[SCOPE_ERROR_CATEGORY] = ErrorCategory.VALIDATION.value
         logger.info(
             "request validation failed",
             extra={"fields": {"category": ErrorCategory.VALIDATION.value}},

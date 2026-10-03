@@ -87,7 +87,7 @@ def test_mask_nested_and_case_insensitive() -> None:
     data = {
         "Password": "p1",
         "profile": {"api_key": "k2", "name": "alice"},
-        "tokens": [{"token": "t3"}, "plain"],
+        "items": [{"token": "t3"}, "plain"],
     }
     masked = mask_sensitive(data)
     print(f"输入: {data}")
@@ -95,7 +95,7 @@ def test_mask_nested_and_case_insensitive() -> None:
     assert masked == {
         "Password": MASK,
         "profile": {"api_key": MASK, "name": "alice"},
-        "tokens": [{"token": MASK}, "plain"],
+        "items": [{"token": MASK}, "plain"],
     }
 
 
