@@ -11,6 +11,11 @@ request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 caller_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "caller_id", default=None
 )
+# 当前请求已归类的错误类别（validation/dependency/unexpected）；
+# 由异常处理器写入，中间件记录指标时读取，未设置时为 None
+error_category_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "error_category", default=None
+)
 
 
 def get_request_id() -> str | None:
@@ -21,3 +26,8 @@ def get_request_id() -> str | None:
 def get_caller_id() -> str | None:
     """返回当前上下文的调用方标识。"""
     return caller_id_var.get()
+
+
+def get_error_category() -> str | None:
+    """返回当前上下文已归类的错误类别。"""
+    return error_category_var.get()

@@ -8,9 +8,14 @@ from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.observability.context import caller_id_var, request_id_var
+from app.observability.context import caller_id_var, error_category_var, request_id_var
 from app.observability.logging import get_logger
-from app.observability.metrics import registry
+from app.observability.metrics import (
+    CATEGORY_DEPENDENCY,
+    CATEGORY_UNEXPECTED,
+    CATEGORY_VALIDATION,
+    registry,
+)
 
 logger = get_logger("app.observability")
 
@@ -55,6 +60,7 @@ class ObservabilityMiddleware:
 
         rid_token = request_id_var.set(request_id)
         cid_token = caller_id_var.set(caller_id)
+        category_token = error_category_var.set(None)
         start = time.perf_counter()
         status_code = 500  # 异常穿透时按 500 计入
 
@@ -72,6 +78,7 @@ class ObservabilityMiddleware:
         except Exception as exc:
             # 未预期异常：在上下文仍存活时记录日志，再返回不含内部细节的 500
             status_code = 500
+            error_category_var.set(CATEGORY_UNEXPECTED)
             logger.error(
                 "unexpected error",
                 extra={"fields": {"category": "unexpected"}},
@@ -100,6 +107,19 @@ class ObservabilityMiddleware:
             await send({"type": "http.response.body", "body": body})
         finally:
             latency_ms = (time.perf_counter() - start) * 1000.0
-            registry.record(caller_id, latency_ms, is_error=status_code >= 400)
+            is_error = status_code >= 400
+            category = error_category_var.get()
+            if is_error and category is None:
+                # 没有异常处理器归类的 4xx/5xx：按状态码兜底归类，保证类别不漏统
+                category = (
+                    CATEGORY_VALIDATION if status_code < 500 else CATEGORY_DEPENDENCY
+                )
+            registry.record(
+                caller_id,
+                latency_ms,
+                is_error=is_error,
+                category=category,
+            )
             request_id_var.reset(rid_token)
             caller_id_var.reset(cid_token)
+            error_category_var.reset(category_token)

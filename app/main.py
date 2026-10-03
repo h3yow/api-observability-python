@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.observability import health
-from app.observability.context import get_caller_id, get_request_id
+from app.observability.context import error_category_var, get_caller_id, get_request_id
 from app.observability.errors import (
     AppError,
     DependencyUnavailableError,
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
+        error_category_var.set(exc.category.value)
         logger.warning(
             "request failed: %s",
             exc.public_message,
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     async def handle_validation_error(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        error_category_var.set(ErrorCategory.VALIDATION.value)
         logger.info(
             "request validation failed",
             extra={"fields": {"category": ErrorCategory.VALIDATION.value}},
